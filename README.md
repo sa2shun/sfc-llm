@@ -27,7 +27,7 @@
 
 1. **リポジトリをクローン**
    ```bash
-   git clone https://github.com/<your-username>/sfc-llm.git
+   git clone https://github.com/sa2shun/sfc-llm.git
    cd sfc-llm
    ```
 
