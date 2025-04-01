@@ -1,107 +1,59 @@
-# SFC-LLM: 環境構築とテキスト生成
+# sfc-llm
 
-## 概要
-
-このリポジトリは、ファインチューニングされた言語モデルを使用してテキスト生成を行う Python スクリプトと、そのための環境構築スクリプトを提供します。
-
-- **環境構築**: `setup.bash`
-- **テキスト生成スクリプト**: `src/chat.py`
+Keio SFCの授業シラバスを検索し、LLMで自然言語回答するチャットアプリケーションです。  
+Milvus によるベクトル検索（RAG）を使って関連情報を取得し、Meta Llama 3 モデルで応答を生成します。
 
 ---
 
-## 構成
-
-### ファイル一覧
-
-- `setup.bash`:
-  - 必要な依存関係をインストールし、Python 仮想環境をセットアップします。
-  - `requirements.txt` が存在する場合、依存関係を仮想環境にインストールします。
-  
-- `src/chat.py`:
-  - ファインチューニングされた言語モデルを使用してテキスト生成を行います。
-  - ベースモデルとファインチューニングモデルの出力を比較するオプションもあります。
-
----
-
-## 環境構築手順
-
-1. **リポジトリをクローン**
-   ```bash
-   git clone https://github.com/sa2shun/sfc-llm.git
-   cd sfc-llm
-   ```
-
-2. **環境構築スクリプトを実行**
-   ```bash
-   bash setup.bash
-   ```
-
-   スクリプトの動作：
-   - Poetry をインストール（未インストールの場合）。
-   - 仮想環境を作成。
-   - `requirements.txt` から依存関係をインストール（存在する場合）。
-
-3. **仮想環境をアクティベート**
-   ```bash
-   poetry shell
-   ```
-
----
-
-## テキスト生成スクリプトの使用方法
-
-1. **実行コマンド**
-   ```bash
-   python src/chat.py --prompt "<プロンプトの内容>" [--compare_models]
-   ```
-
-2. **引数**
-   - `--prompt` (必須): モデルに入力するプロンプト。
-   - `--compare_models` (オプション): ベースモデルとの比較を有効化。
-
-3. **例**
-   ファインチューニングされたモデルでテキスト生成：
-   ```bash
-   python src/chat.py --prompt "SFC生に必要なものは"
-   ```
-
-   ファインチューニングモデルとベースモデルを比較：
-   ```bash
-   python src/chat.py --prompt "SFC生に必要なものは" --compare_models
-   ```
-
----
-
-## プロジェクト構造
+## 🔧 構成
 
 ```
-sfc-llm/
-├── setup.bash         # 環境構築スクリプト
-├── requirements.txt   # 依存関係一覧（存在する場合）
+.
 ├── src/
-│   └── chat.py        # テキスト生成スクリプト
-├── models/            # モデルデータを格納するディレクトリ
-└── README.md          # このファイル
+│   ├── chat_server.py       # FastAPI アプリケーション本体
+│   ├── test_chat.py         # 動作確認用クライアントスクリプト
+│   ├── milvus_search.py     # Milvus による検索処理
+│   ├── test_collections.py  # コレクション存在確認
+├── scripts/
+│   └── init_syllabus_collection.py  # Milvus コレクション作成＋データ投入
+├── csvs/
+│   └── sfc_syllabus.csv     # 授業データ
 ```
 
 ---
 
-## 注意事項
+## 🚀 起動手順
 
-1. **モデルファイルの配置**:
-   `models/` ディレクトリにファインチューニングされたモデルを配置してください（例: `fine_tuned_model_epoch_3`）。
+### 1. 依存パッケージのインストール（初回のみ）
 
-2. **依存関係**:
-   - Python 3.8 以降が必要です。
-   - トークン生成には `transformers` ライブラリを使用しています。
+```bash
+poetry install
+```
 
-3. **リモートリポジトリ**:
-   リポジトリのクローン後、環境構築を行うことでスムーズに実行できます。
+### 2. Milvus にコレクション作成（初回のみ）
+
+```bash
+poetry run python scripts/init_syllabus_collection.py
+```
+
+### 3. FastAPI サーバー起動
+
+```bash
+poetry run uvicorn src.chat_server:app --host 0.0.0.0 --port 8001
+```
+
+### 4. 動作確認クライアントの実行
+
+```bash
+poetry run python src/test_chat.py
+```
 
 ---
 
-## ライセンス
+## 📦 使用技術
 
-MIT ライセンスの下で提供されています。詳細は [LICENSE](LICENSE) ファイルを参照してください。
+- **LLM**: Meta Llama 3 70B Instruct（HuggingFace）
+- **検索**: Milvus（ローカルDBモード）
+- **執算化**: SentenceTransformer (`all-MiniLM-L6-v2`)
+- **APIサーバー**: FastAPI
 
----

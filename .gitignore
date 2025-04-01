@@ -1,3 +1,11 @@
 .env
 .DS_Store
 /Users/sasakishun/Documents/keio/kawashima-ken/SFCLLM/unrelated_files/*
+.sfc_syllabus.db.lock
+poetry.lock
+sfc_syllabus.db
+pyproject.toml
+models/mixtral/.gitattributes
+models/mixtral/model.safetensors
+models/mixtral/tokenizer.model
+
