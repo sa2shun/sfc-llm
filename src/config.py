@@ -3,6 +3,7 @@ Configuration settings for the SFC-LLM application.
 """
 import os
 from pathlib import Path
+import getpass
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
@@ -27,6 +28,8 @@ EMBEDDING_DEVICE = os.environ.get("SFC_LLM_EMBEDDING_DEVICE", "cpu")
 # API settings
 API_HOST = os.environ.get("SFC_LLM_API_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("SFC_LLM_API_PORT", "8001"))
+API_PASSWORD = os.environ.get("SFC_LLM_API_PASSWORD", "kawallmshima")
+API_REQUIRE_AUTH = os.environ.get("SFC_LLM_API_REQUIRE_AUTH", "true").lower() == "true"
 
 # RAG settings
 RAG_TOP_K = 5

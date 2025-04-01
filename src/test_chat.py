@@ -7,6 +7,8 @@ import argparse
 import time
 import os
 import sys
+import getpass
+#!/usr/bin/env python
 
 # Add the project root to the Python path when run directly
 if __name__ == "__main__":
@@ -14,9 +16,9 @@ if __name__ == "__main__":
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
 
-from src.config import API_HOST, API_PORT
+from src.config import API_HOST, API_PORT, API_PASSWORD, API_REQUIRE_AUTH
 
-def chat_with_llm(query: str, verbose: bool = True):
+def chat_with_llm(query: str, verbose: bool = True, api_key: str = None):
     """
     Send a chat request to the API and print the response.
     
@@ -30,10 +32,19 @@ def chat_with_llm(query: str, verbose: bool = True):
     print("Thinking...", end="", flush=True)
     
     try:
+        # Prepare headers
+        headers = {"Content-Type": "application/json"}
+        
+        # Add API key if authentication is required
+        if API_REQUIRE_AUTH:
+            if not api_key:
+                api_key = API_PASSWORD
+            headers["X-API-Key"] = api_key
+        
         start_time = time.time()
         response = requests.post(
             url,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             json={"user_input": query},
             timeout=None  # No timeout - wait as long as needed for LLM inference
         )
@@ -87,9 +98,11 @@ def main():
                         help="Query to send to the API")
     parser.add_argument("-v", "--verbose", action="store_true", 
                         help="Print detailed information")
+    parser.add_argument("-k", "--api-key", 
+                        help="API key for authentication (if not provided, will use default)")
     args = parser.parse_args()
     
-    chat_with_llm(args.query, args.verbose)
+    chat_with_llm(args.query, args.verbose, args.api_key)
 
 if __name__ == "__main__":
     main()

@@ -1,9 +1,10 @@
 """
 FastAPI server for the SFC-LLM chat application.
 """
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 import logging
 import time
@@ -24,7 +25,7 @@ from src.prompts import (
     get_rag_response_prompt,
     get_general_response_prompt
 )
-from src.config import API_HOST, API_PORT
+from src.config import API_HOST, API_PORT, API_PASSWORD, API_REQUIRE_AUTH
 
 # Configure logging
 logging.basicConfig(
@@ -39,6 +40,23 @@ app = FastAPI(
     description="API for SFC syllabus search and LLM-powered responses",
     version="1.0.0"
 )
+
+# API key security
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def get_api_key(api_key_header: str = Security(api_key_header)):
+    """Validate API key if authentication is required."""
+    if not API_REQUIRE_AUTH:
+        return True
+    
+    if api_key_header and api_key_header == API_PASSWORD:
+        return True
+    
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or missing API key",
+        headers={"WWW-Authenticate": "ApiKey"},
+    )
 
 # Add CORS middleware
 app.add_middleware(
@@ -69,7 +87,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, authenticated: bool = Depends(get_api_key)):
     """
     Process a chat request and return a response.
     
@@ -157,7 +175,7 @@ def chat(req: ChatRequest):
 @app.get("/health")
 def health_check():
     """Health check endpoint."""
-    return {"status": "ok"}
+    return {"status": "ok", "auth_required": API_REQUIRE_AUTH}
 
 if __name__ == "__main__":
     import uvicorn

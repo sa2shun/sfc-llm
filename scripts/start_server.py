@@ -8,6 +8,8 @@ import subprocess
 import time
 import signal
 import logging
+import argparse
+#!/usr/bin/env python
 
 # Add the project root to the Python path when run directly
 if __name__ == "__main__":
@@ -15,7 +17,7 @@ if __name__ == "__main__":
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
 
-from src.config import API_HOST, API_PORT
+from src.config import API_HOST, API_PORT, API_REQUIRE_AUTH
 
 # Configure logging
 logging.basicConfig(
@@ -24,14 +26,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def print_banner():
+def print_banner(is_local):
     """Print a welcome banner."""
     print("\n" + "=" * 60)
     print("  SFC-LLM サーバー起動スクリプト")
     print("=" * 60)
-    print("\nKeio SFCの授業シラバスを検索し、LLMで自然言語回答するチャットアプリケーション\n")
+    print("\nKeio SFCの授業シラバスを検索し、LLMで自然言語回答するチャットアプリケーション")
+    
+    mode = "ローカルモード" if is_local else "グローバルモード (外部アクセス可能)"
+    auth = "認証必須" if API_REQUIRE_AUTH else "認証なし"
+    print(f"\n実行モード: {mode} - {auth}\n")
 
-def print_instructions():
+def print_instructions(host, port, is_local):
     """Print usage instructions."""
     print("\n" + "-" * 60)
     print("  使用方法")
@@ -42,33 +48,45 @@ def print_instructions():
     print(f"   python src/test_chat.py -v \"データサイエンスの授業はありますか\"")
     print("\n3. 検索性能をテストするには：")
     print(f"   python scripts/test_search_performance.py")
-    print("\n4. このサーバーを停止するには Ctrl+C を押してください")
+    
+    if not is_local and API_REQUIRE_AUTH:
+        print("\n4. 外部からAPIにアクセスする場合は、X-API-Keyヘッダーに認証キーを設定してください")
+        print(f"   例: curl -H \"X-API-Key: [パスワード]\" -H \"Content-Type: application/json\" -d '{{\"user_input\":\"質問\"}}' http://{host}:{port}/chat")
+    
+    print(f"\n{4 if is_local or not API_REQUIRE_AUTH else 5}. このサーバーを停止するには Ctrl+C を押してください")
     print("-" * 60 + "\n")
 
-def start_server():
+def start_server(is_local=True):
     """Start the SFC-LLM server."""
-    print_banner()
+    # Set host based on mode
+    host = "127.0.0.1" if is_local else "0.0.0.0"
+    port = API_PORT
+    
+    # Set environment variables
+    os.environ["SFC_LLM_API_HOST"] = host
+    
+    print_banner(is_local)
     
     # Check if the server is already running
     try:
         import requests
-        response = requests.get(f"http://{API_HOST}:{API_PORT}/health", timeout=2)
+        response = requests.get(f"http://{host}:{port}/health", timeout=2)
         if response.status_code == 200:
-            logger.info(f"サーバーは既に起動しています (http://{API_HOST}:{API_PORT})")
-            print_instructions()
+            logger.info(f"サーバーは既に起動しています (http://{host}:{port})")
+            print_instructions(host, port, is_local)
             return
     except:
         pass
     
     # Start the server
-    logger.info(f"サーバーを起動しています (http://{API_HOST}:{API_PORT})...")
+    logger.info(f"サーバーを起動しています (http://{host}:{port})...")
     
     try:
         # Use subprocess to start the server
         server_cmd = [sys.executable, "-m", "src.chat_server"]
         
         # Print instructions
-        print_instructions()
+        print_instructions(host, port, is_local)
         
         # Start the server process
         logger.info("サーバープロセスを開始します...")
@@ -92,4 +110,31 @@ def start_server():
         sys.exit(1)
 
 if __name__ == "__main__":
-    start_server()
+    parser = argparse.ArgumentParser(description="SFC-LLM サーバー起動スクリプト")
+    parser.add_argument(
+        "--local", 
+        action="store_true", 
+        help="ローカルモードで起動 (127.0.0.1, 外部からアクセス不可)"
+    )
+    parser.add_argument(
+        "--global", 
+        dest="global_mode",
+        action="store_true", 
+        help="グローバルモードで起動 (0.0.0.0, 外部からアクセス可能)"
+    )
+    parser.add_argument(
+        "--no-auth", 
+        action="store_true", 
+        help="認証を無効化"
+    )
+    
+    args = parser.parse_args()
+    
+    # Set authentication mode
+    if args.no_auth:
+        os.environ["SFC_LLM_API_REQUIRE_AUTH"] = "false"
+    
+    # Determine server mode (default to local if neither specified)
+    is_local = not args.global_mode if args.global_mode else True
+    
+    start_server(is_local)

@@ -73,13 +73,44 @@ python scripts/init_syllabus_collection.py
 
 ```bash
 # 便利な起動スクリプトを使用（推奨）
-python scripts/start_server.py
+python scripts/start_server.py  # デフォルトはローカルモード (127.0.0.1)
+
+# グローバルモードで起動（外部からアクセス可能）
+python scripts/start_server.py --global
+
+# 認証なしで起動
+python scripts/start_server.py --no-auth
+
+# グローバルモードかつ認証なしで起動
+python scripts/start_server.py --global --no-auth
 
 # または直接起動
 python -m src.chat_server
 
 # または uvicorn を使用
 uvicorn src.chat_server:app --host 0.0.0.0 --port 8001
+```
+
+### 認証設定
+
+サーバーはデフォルトでパスワード認証が有効になっています。以下の環境変数で設定を変更できます：
+
+```bash
+# 認証パスワードの設定（デフォルト: "kawallmshima"）
+export SFC_LLM_API_PASSWORD="your_password_here"
+
+# 認証の有効/無効切り替え（デフォルト: true）
+export SFC_LLM_API_REQUIRE_AUTH="false"  # 認証を無効化
+```
+
+外部からAPIにアクセスする場合は、リクエストヘッダーに `X-API-Key` を設定する必要があります：
+
+```bash
+# curlの例
+curl -H "X-API-Key: kawallmshima" \
+     -H "Content-Type: application/json" \
+     -d '{"user_input":"プログラミングの授業を教えてください"}' \
+     http://your-server:8001/chat
 ```
 
 ### 5. 動作確認クライアントの実行
@@ -93,6 +124,9 @@ python src/test_chat.py "プログラミングの授業を教えてください"
 
 # 詳細情報を表示
 python src/test_chat.py -v
+
+# カスタムAPIキーを指定
+python src/test_chat.py -k "your_api_key" "プログラミングの授業を教えてください"
 ```
 
 ### 6. 検索性能のテスト
@@ -138,6 +172,8 @@ python scripts/test_search_performance.py
 - **エラーハンドリング**: 堅牢なエラー処理と詳細なログ出力
 - **設定の柔軟性**: 環境変数による各種設定のカスタマイズ
 - **パフォーマンステスト**: 検索性能を評価するためのテストスクリプト
+- **API認証**: 外部公開時のセキュリティ確保のためのAPIキー認証
+- **ローカル/グローバルモード**: 用途に応じたサーバー起動モードの切り替え
 
 ### 検索性能の最適化
 
