@@ -185,6 +185,190 @@ python scripts/test_search_performance.py
 
 ---
 
+## 🔧 Docker を使用した起動
+
+### Docker Compose での起動（推奨）
+
+```bash
+# 環境変数ファイルを作成
+cp .env.example .env
+# .envファイルでHUGGINGFACE_TOKENを設定
+
+# 全サービスを起動（Milvus + SFC-LLM）
+docker-compose up -d
+
+# データベース初期化
+docker-compose exec sfc-llm python scripts/init_syllabus_collection.py
+
+# 動作確認
+docker-compose exec sfc-llm python src/test_chat.py
+
+# ログ確認
+docker-compose logs sfc-llm
+
+# サービス停止
+docker-compose down
+
+# 完全リセット（データも削除）
+docker-compose down -v
+```
+
+### Docker の利点
+
+- **簡単セットアップ**: Milvus データベースも含めて一括起動
+- **環境分離**: ホスト環境への影響なし
+- **再現性**: 異なる環境での一貫した動作
+- **スケーラビリティ**: 容易な水平スケール
+
+---
+
+## ⚡ 性能最適化ガイド
+
+### 現在の性能特性
+
+- **レスポンス時間**: 5-10秒（通常のクエリ）
+- **メモリ使用量**: 8-16GB（70Bモデル使用時）
+- **同時処理**: 1-2リクエスト
+
+### 推奨最適化手法
+
+#### 1. LLMモデル最適化（最重要）
+
+```python
+# utils/llm.py での実装例
+@lru_cache(maxsize=1)
+def get_model() -> AutoModelForCausalLM:
+    model = AutoModelForCausalLM.from_pretrained(
+        LOCAL_MODEL_DIR,
+        device_map="auto",
+        torch_dtype=torch.float16,  # Half精度で高速化
+        load_in_8bit=True,         # 8bit量子化でメモリ50%削減
+        use_cache=True,            # KVキャッシュ有効化
+        token=HF_TOKEN
+    )
+    
+    # PyTorch 2.0 コンパイル最適化
+    if hasattr(torch, 'compile'):
+        model = torch.compile(model, mode="reduce-overhead")
+    
+    return model
+```
+
+**期待効果**: メモリ使用量50%削減、推論速度20-30%向上
+
+#### 2. 検索システム最適化
+
+```python
+# src/milvus_search.py での実装例
+from functools import lru_cache
+import hashlib
+
+@lru_cache(maxsize=100)
+def search_syllabus_cached(query_hash: str, top_k: int):
+    """検索結果をキャッシュして高速化"""
+    return _search_syllabus_internal(query_hash, top_k)
+
+def search_syllabus(query: str, top_k=RAG_TOP_K):
+    query_hash = hashlib.md5(query.encode()).hexdigest()
+    return search_syllabus_cached(query_hash, top_k)
+```
+
+**期待効果**: 重複クエリのレスポンス時間90%削減
+
+#### 3. 埋め込み生成キャッシュ
+
+```python
+# utils/embedding.py での実装例
+class EmbeddingCache:
+    def __init__(self, cache_dir="./cache/embeddings"):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._cache = {}
+    
+    def get_embedding(self, text: str):
+        key = hashlib.md5(text.encode()).hexdigest()
+        if key in self._cache:
+            return self._cache[key]
+        # キャッシュから読み込みまたは新規生成
+```
+
+**期待効果**: 埋め込み計算時間80%削減
+
+#### 4. 非同期API処理
+
+```python
+# src/chat_server.py での実装例
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+
+executor = ThreadPoolExecutor(max_workers=4)
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    loop = asyncio.get_event_loop()
+    
+    # CPU集約的な処理を別スレッドで実行
+    result = await loop.run_in_executor(
+        executor, 
+        generate_response, 
+        prompt
+    )
+    return result
+```
+
+**期待効果**: 同時処理能力3-5倍向上
+
+### 性能監視
+
+```bash
+# メモリ使用量監視
+docker stats sfc-llm
+
+# レスポンス時間測定
+python scripts/test_search_performance.py
+
+# GPU使用率確認（GPU使用時）
+nvidia-smi
+```
+
+### ハードウェア推奨仕様
+
+#### 最小構成
+- **CPU**: 4コア以上
+- **メモリ**: 16GB以上
+- **ストレージ**: 50GB以上
+
+#### 推奨構成
+- **CPU**: 8コア以上
+- **メモリ**: 32GB以上
+- **GPU**: NVIDIA GPU 12GB VRAM以上（RTX 3060 Ti/4070以上）
+- **ストレージ**: SSD 100GB以上
+
+#### 本格運用構成
+- **CPU**: 16コア以上
+- **メモリ**: 64GB以上
+- **GPU**: NVIDIA A100/H100または複数GPU
+- **ストレージ**: NVMe SSD 200GB以上
+
+### 実装優先度
+
+1. **高優先度**（即効性あり）
+   - モデル量子化とGPUメモリ最適化
+   - 検索結果キャッシュ
+   - API非同期処理
+
+2. **中優先度**
+   - 埋め込みキャッシュ
+   - バッチ処理対応
+   - レスポンス圧縮
+
+3. **低優先度**（長期的改善）
+   - Redis外部キャッシュ
+   - 高度なレート制限
+   - 分散処理対応
+
+---
+
 ## 🤝 コントリビューション
 
 このプロジェクトへの貢献を歓迎します。以下の手順で開発に参加できます：
