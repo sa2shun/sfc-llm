@@ -1,35 +1,83 @@
 # SFC-LLM
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Docker](https://img.shields.io/badge/docker-supported-blue.svg)](https://www.docker.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
+
+**先進的なVision Language Model (VLM) 対応 SFC シラバス検索チャットボット**
+
 Keio SFCの授業シラバスを検索し、LLMで自然言語回答するチャットアプリケーションです。  
-Milvus によるベクトル検索（RAG）を使って関連情報を取得し、Meta Llama 3 モデルで応答を生成します。
+最新のVLM技術により、画像とテキストを同時処理し、高精度な授業情報提供を実現します。
 
----
+## ✨ 主な特徴
 
-## 🔧 プロジェクト構成
+- 🤖 **複数のAIモデル対応**: LLM、VLM、vLLMによる高速推論
+- 🖼️ **マルチモーダル処理**: テキスト + 画像の同時解析
+- 🔍 **高精度検索**: Milvusベクトルデータベースによる意味的検索
+- 🚀 **パフォーマンス最適化**: vLLMで10-20倍高速化
+- 🐳 **Docker対応**: 開発から本番まで一貫した環境
+- 🔐 **セキュリティ**: API認証とレート制限
+- 📊 **監視機能**: ヘルスチェックとメトリクス
+
+## 🏗️ アーキテクチャ
 
 ```
-.
-├── src/                     # メインアプリケーションコード
-│   ├── __init__.py          # Pythonパッケージ化
-│   ├── chat_server.py       # FastAPI アプリケーション本体
-│   ├── config.py            # 設定ファイル
-│   ├── milvus_search.py     # Milvus による検索処理
-│   ├── prompts.py           # LLMプロンプトテンプレート
-│   ├── test_chat.py         # 動作確認用クライアントスクリプト
-│   └── test_collections.py  # コレクション存在確認
-├── utils/                   # ユーティリティ関数
-│   ├── __init__.py          # Pythonパッケージ化
-│   ├── embedding.py         # 埋め込みベクトル生成ユーティリティ
-│   └── llm.py               # LLM関連ユーティリティ
-├── scripts/                 # 実行スクリプト
-│   ├── __init__.py          # Pythonパッケージ化
-│   ├── init_syllabus_collection.py  # Milvus コレクション作成＋データ投入
-│   ├── test_search_performance.py   # 検索性能評価スクリプト
-│   └── start_server.py              # サーバー起動補助スクリプト
-├── csvs/                    # データファイル
-│   └── sfc_syllabus.csv     # 授業データ
-└── models/                  # モデルファイル
-    └── mixtral/             # LLMモデルファイル
+┌─────────────────┐    ┌──────────────┐    ┌─────────────────┐
+│   Frontend      │    │   API Server │    │   AI Engines    │
+│                 │    │              │    │                 │
+│ • Web UI        │◄──►│ • FastAPI    │◄──►│ • LLM (Llama3)  │
+│ • CLI Client    │    │ • Auth       │    │ • VLM (LLaVA)   │
+│ • REST API      │    │ • Rate Limit │    │ • vLLM Engine   │
+└─────────────────┘    └──────────────┘    └─────────────────┘
+                              │
+                              ▼
+                    ┌──────────────────┐    ┌─────────────────┐
+                    │ Vector Database  │    │ Knowledge Base  │
+                    │                  │    │                 │
+                    │ • Milvus        │◄──►│ • SFC Syllabus  │
+                    │ • Embeddings    │    │ • Course Data   │
+                    │ • Semantic      │    │ • Metadata      │
+                    │   Search        │    │                 │
+                    └──────────────────┘    └─────────────────┘
+```
+
+## 📁 プロジェクト構成
+
+```
+sfc-llm/
+├── 🚀 src/                          # コアアプリケーション
+│   ├── chat_server.py               # 標準チャットサーバー
+│   ├── vlm_chat_server.py          # VLM対応サーバー
+│   ├── enhanced_chat_server.py     # 拡張機能サーバー
+│   ├── config.py                   # 設定管理（型安全）
+│   ├── milvus_search.py            # ベクトル検索エンジン
+│   └── prompts.py                  # プロンプトテンプレート
+├── 🔧 utils/                        # ユーティリティ
+│   ├── llm.py                      # LLM推論エンジン
+│   ├── vlm_engine.py               # VLMエンジン
+│   ├── vllm_engine.py              # 高速推論エンジン
+│   ├── embedding.py                # 埋め込み生成
+│   ├── multimodal.py               # マルチモーダル処理
+│   └── course_planner.py           # 履修プランニング
+├── 📜 scripts/                      # 実行スクリプト
+│   ├── start_server.py             # サーバー起動
+│   ├── start_vlm_server.py         # VLMサーバー起動
+│   └── init_syllabus_collection.py # DB初期化
+├── 🧪 tests/                       # テストスイート
+│   ├── test_config.py              # 設定テスト
+│   ├── test_embedding.py           # 埋め込みテスト
+│   ├── test_integration.py         # 統合テスト
+│   └── run_tests.py                # テストランナー
+├── 📚 docs/                        # ドキュメント
+│   └── PERFORMANCE_GUIDE.md        # パフォーマンスガイド
+├── 🐳 Docker関連
+│   ├── Dockerfile                  # マルチステージビルド
+│   └── docker-compose.yml          # オーケストレーション
+└── 📊 データ・設定
+    ├── csvs/sfc_syllabus.csv       # シラバスデータ
+    ├── models/                     # AIモデル
+    └── cache/                      # キャッシュ
 ```
 
 ---
@@ -50,7 +98,7 @@ export SFC_LLM_EMBEDDING_DEVICE="cuda:0"
 
 # APIサーバーのホスト・ポート設定（任意）
 export SFC_LLM_API_HOST="0.0.0.0"
-export SFC_LLM_API_PORT="8001"
+export SFC_LLM_API_PORT="9001"
 ```
 
 ### 2. 依存パッケージのインストール（初回のみ）
@@ -65,9 +113,16 @@ pip install -r requirements.txt
 
 ### 3. Milvus にコレクション作成（初回のみ）
 
+研究会を除外したSFCシラバスデータベースを作成します：
+
 ```bash
 python scripts/init_syllabus_collection.py
 ```
+
+このスクリプトは以下の処理を行います：
+- 元のCSVデータから研究会を含む授業を除外
+- SFC学部・研究科の授業のみを対象
+- 埋め込みベクトルを生成してMilvusに保存
 
 ### 4. FastAPI サーバー起動
 
@@ -88,7 +143,7 @@ python scripts/start_server.py --global --no-auth
 python -m src.chat_server
 
 # または uvicorn を使用
-uvicorn src.chat_server:app --host 0.0.0.0 --port 8001
+uvicorn src.chat_server:app --host 0.0.0.0 --port 9001
 ```
 
 ### 認証設定
@@ -110,7 +165,7 @@ export SFC_LLM_API_REQUIRE_AUTH="false"  # 認証を無効化
 curl -H "X-API-Key: kawallmshima" \
      -H "Content-Type: application/json" \
      -d '{"user_input":"プログラミングの授業を教えてください"}' \
-     http://your-server:8001/chat
+     http://your-server:9001/chat
 ```
 
 ### 5. 動作確認クライアントの実行
@@ -166,6 +221,7 @@ python scripts/test_search_performance.py
 
 ## 🔍 主な機能
 
+- **研究会除外フィルタ**: データベース作成時に研究会を含む授業を自動的に除外
 - **最適化された検索**: 授業概要フィールドに特化したインデックスによる高速検索
 - **RAG判定**: 質問内容に応じて自動的にRAGが必要かどうかを判断
 - **キャッシュ機能**: モデルや埋め込み関数のキャッシュによるパフォーマンス向上

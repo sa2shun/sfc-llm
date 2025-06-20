@@ -1,0 +1,215 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PYTHON_VERSION: '3.10'
+  NODE_VERSION: '18'
+
+jobs:
+  # Code Quality Checks
+  lint-and-format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      
+    - name: Configure Poetry
+      run: poetry config virtualenvs.create true
+      
+    - name: Cache Poetry dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pypoetry
+        key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+        
+    - name: Install dependencies
+      run: poetry install
+      
+    - name: Run black (code formatting)
+      run: poetry run black --check src/ utils/ scripts/ tests/
+      
+    - name: Run flake8 (linting)
+      run: poetry run flake8 src/ utils/ scripts/ tests/
+      
+    - name: Run mypy (type checking)
+      run: poetry run mypy src/ utils/ --ignore-missing-imports
+
+  # Unit Tests
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11']
+        
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      
+    - name: Install dependencies
+      run: poetry install
+      
+    - name: Run unit tests
+      run: |
+        export SFC_LLM_LOG_LEVEL=WARNING
+        poetry run python tests/run_tests.py --type unit
+        
+    - name: Generate coverage report
+      run: |
+        poetry run pytest tests/ --cov=src/ --cov=utils/ --cov-report=xml
+        
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+
+  # Security Scanning
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      
+    - name: Install dependencies
+      run: poetry install
+      
+    - name: Run safety (dependency vulnerability check)
+      run: poetry run safety check
+      
+    - name: Run bandit (security linting)
+      run: poetry run bandit -r src/ utils/ scripts/
+
+  # Docker Build Test
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build production image
+      run: |
+        docker build --target production -t sfc-llm:test .
+        
+    - name: Build VLM image
+      run: |
+        docker build --target vlm -t sfc-llm-vlm:test .
+        
+    - name: Test Docker image
+      run: |
+        docker run --rm sfc-llm:test python -c "import src.config; print('Config loaded successfully')"
+
+  # Integration Tests (with services)
+  integration-test:
+    runs-on: ubuntu-latest
+    services:
+      # Use Milvus Lite for testing
+      milvus:
+        image: milvusdb/milvus:v2.4.0
+        ports:
+          - 19530:19530
+        options: >-
+          --health-cmd="curl -f http://localhost:9091/healthz"
+          --health-interval=30s
+          --health-timeout=10s
+          --health-retries=3
+          
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      
+    - name: Install dependencies
+      run: poetry install
+      
+    - name: Wait for Milvus
+      run: |
+        timeout 60s bash -c 'until curl -f http://localhost:19530/health; do sleep 5; done'
+        
+    - name: Run integration tests
+      env:
+        HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        SFC_LLM_API_REQUIRE_AUTH: false
+        SFC_LLM_LOG_LEVEL: WARNING
+      run: |
+        poetry run python tests/run_tests.py --type integration
+
+  # Build and Push Docker Images (on main branch)
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [lint-and-format, test, security, docker-build]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ secrets.DOCKER_USERNAME }}/sfc-llm
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+          
+    - name: Build and push production image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        target: production
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Build and push VLM image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        target: vlm
+        push: true
+        tags: ${{ secrets.DOCKER_USERNAME }}/sfc-llm:vlm-latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

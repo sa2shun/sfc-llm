@@ -3,11 +3,12 @@ version: '3.8'
 services:
   # Milvus vector database
   milvus:
-    image: milvusdb/milvus:v2.3.0
+    image: milvusdb/milvus:v2.4.0
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
+      MILVUS_LOG_LEVEL: INFO
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
@@ -17,6 +18,11 @@ services:
       - etcd
       - minio
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # etcd for Milvus metadata storage
   etcd:
@@ -30,45 +36,139 @@ services:
       - etcd_data:/etcd
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # MinIO for Milvus object storage
   minio:
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    image: minio/minio:RELEASE.2023-12-20T01-00-02Z
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
     ports:
-      - "9001:9000"
+      - "9000:9000"
       - "9002:9001"
     volumes:
       - minio_data:/data
     command: minio server /data --console-address ":9001"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # SFC-LLM Application
+  # SFC-LLM Application (Standard)
   sfc-llm:
-    build: .
+    build:
+      context: .
+      target: production
     ports:
-      - "9001:9001"
+      - "${SFC_LLM_API_PORT:-9001}:9001"
+    environment:
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+      - SFC_LLM_API_HOST=0.0.0.0
+      - SFC_LLM_API_PORT=9001
+      - SFC_LLM_EMBEDDING_DEVICE=${SFC_LLM_EMBEDDING_DEVICE:-cpu}
+      - SFC_LLM_API_PASSWORD=${SFC_LLM_API_PASSWORD:-kawallmshima}
+      - SFC_LLM_API_REQUIRE_AUTH=${SFC_LLM_API_REQUIRE_AUTH:-true}
+      - SFC_LLM_LOG_LEVEL=${SFC_LLM_LOG_LEVEL:-INFO}
+      - SFC_LLM_EMBEDDING_CACHE_SIZE=${SFC_LLM_EMBEDDING_CACHE_SIZE:-100}
+      - SFC_LLM_SEARCH_CACHE_SIZE=${SFC_LLM_SEARCH_CACHE_SIZE:-100}
+      - SFC_LLM_USE_VLLM=${SFC_LLM_USE_VLLM:-false}
+    volumes:
+      - ./models:/app/models:ro
+      - ./csvs:/app/csvs:ro
+      - app_cache:/app/cache
+      - app_logs:/app/logs
+    depends_on:
+      milvus:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["standard", ""]
+
+  # SFC-LLM VLM Application (Vision Language Model)
+  sfc-llm-vlm:
+    build:
+      context: .
+      target: vlm
+    ports:
+      - "${SFC_LLM_VLM_PORT:-9003}:9001"
+    environment:
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+      - SFC_LLM_API_HOST=0.0.0.0
+      - SFC_LLM_API_PORT=9001
+      - SFC_LLM_VLM_MODEL=${SFC_LLM_VLM_MODEL:-llava-hf/llava-v1.6-mistral-7b-hf}
+      - SFC_LLM_EMBEDDING_DEVICE=${SFC_LLM_EMBEDDING_DEVICE:-cpu}
+      - SFC_LLM_API_PASSWORD=${SFC_LLM_API_PASSWORD:-kawallmshima}
+      - SFC_LLM_API_REQUIRE_AUTH=${SFC_LLM_API_REQUIRE_AUTH:-true}
+      - SFC_LLM_LOG_LEVEL=${SFC_LLM_LOG_LEVEL:-INFO}
+    volumes:
+      - ./models:/app/models:ro
+      - ./csvs:/app/csvs:ro
+      - app_cache:/app/cache
+      - app_logs:/app/logs
+    depends_on:
+      milvus:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["vlm"]
+
+  # Development Application
+  sfc-llm-dev:
+    build:
+      context: .
+      target: development
+    ports:
+      - "${SFC_LLM_DEV_PORT:-9004}:9001"
     environment:
       - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
       - SFC_LLM_API_HOST=0.0.0.0
       - SFC_LLM_API_PORT=9001
       - SFC_LLM_EMBEDDING_DEVICE=cpu
-      - SFC_LLM_API_PASSWORD=${SFC_LLM_API_PASSWORD:-kawallmshima}
-      - SFC_LLM_API_REQUIRE_AUTH=${SFC_LLM_API_REQUIRE_AUTH:-true}
-      - MILVUS_HOST=milvus
-      - MILVUS_PORT=19530
+      - SFC_LLM_API_REQUIRE_AUTH=false
+      - SFC_LLM_LOG_LEVEL=DEBUG
     volumes:
-      - ./models:/app/models
-      - ./csvs:/app/csvs
-      - milvus_db:/app/milvus_data
+      - .:/app
+      - app_cache:/app/cache
+      - app_logs:/app/logs
     depends_on:
-      - milvus
+      milvus:
+        condition: service_healthy
     restart: unless-stopped
+    profiles: ["dev"]
+
+  # Redis for advanced caching (optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    profiles: ["cache"]
+
+  # Nginx reverse proxy (optional)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - sfc-llm
+    restart: unless-stopped
+    profiles: ["proxy"]
 
 volumes:
   milvus_data:
   etcd_data:
   minio_data:
-  milvus_db:
+  app_cache:
+  app_logs:
+  redis_data:

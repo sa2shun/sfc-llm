@@ -9,8 +9,11 @@ from pydantic import BaseModel
 import logging
 import time
 import traceback
+import asyncio
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 # Add the project root to the Python path when run directly
 if __name__ == "__main__":
@@ -27,12 +30,18 @@ from src.prompts import (
 )
 from src.config import API_HOST, API_PORT, API_PASSWORD, API_REQUIRE_AUTH
 
+# Import config for logging settings
+from src.config import LOG_LEVEL, LOG_FORMAT
+
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format=LOG_FORMAT
 )
 logger = logging.getLogger(__name__)
+
+# Thread pool for CPU-intensive tasks
+executor = ThreadPoolExecutor(max_workers=4)
 
 # FastAPI app definition
 app = FastAPI(
@@ -74,7 +83,43 @@ class ChatResponse(BaseModel):
     reply: str
     rag_used: bool
     processing_time: float
-    rag_context: str = None
+    rag_context: Optional[str] = None
+
+def should_use_rag_heuristic(user_input: str) -> bool:
+    """
+    Quick heuristic to determine if RAG should be used.
+    This helps avoid LLM calls for obvious cases.
+    """
+    query_lower = user_input.lower()
+    
+    # Japanese keywords that likely need SFC syllabus data
+    sfc_keywords = [
+        "授業", "科目", "講義", "セミナー", "演習", "ゼミ", "単位", "履修",
+        "プログラミング", "データサイエンス", "AI", "機械学習", "統計",
+        "経済", "政策", "メディア", "デザイン", "環境", "バイオ",
+        "英語", "中国語", "韓国語", "language", "english",
+        "学部", "大学院", "faculty", "graduate",
+        "春学期", "秋学期", "semester", "開講",
+        "sfc", "湘南藤沢", "慶應"
+    ]
+    
+    # If query contains SFC-related keywords, likely needs RAG
+    if any(keyword in query_lower for keyword in sfc_keywords):
+        return True
+    
+    # General greetings or questions that don't need syllabus data
+    general_keywords = [
+        "こんにちは", "hello", "はじめまして", "ありがとう", "thank you",
+        "今日", "明日", "天気", "weather", "時間", "time",
+        "どうして", "なぜ", "why", "how are you", "元気"
+    ]
+    
+    # If query is general greeting/question, likely doesn't need RAG
+    if any(keyword in query_lower for keyword in general_keywords):
+        return False
+    
+    # For ambiguous cases, default to using RAG
+    return True
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -86,33 +131,30 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "An internal server error occurred."}
     )
 
-@app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest, authenticated: bool = Depends(get_api_key)):
-    """
-    Process a chat request and return a response.
+def _process_chat_sync(user_input: str) -> dict:
+    """Synchronous chat processing function for thread pool."""
+    # Step 1: Fast heuristic check first
+    rag_needed_heuristic = should_use_rag_heuristic(user_input)
     
-    Args:
-        req: The chat request containing the user's input
-        
-    Returns:
-        A response containing the LLM's reply
-    """
-    start_time = time.time()
-    user_input = req.user_input
+    if not rag_needed_heuristic:
+        # Skip RAG decision LLM call for obvious general queries
+        logger.info("Heuristic determined no RAG needed")
+        final_prompt = get_general_response_prompt(user_input)
+        reply = generate_response(final_prompt)
+        return {
+            "reply": reply,
+            "rag_used": False,
+            "rag_context": None
+        }
     
-    if not user_input or not user_input.strip():
-        raise HTTPException(status_code=400, detail="User input cannot be empty")
-    
-    logger.info(f"Received chat request: {user_input[:50]}...")
-    
-    # Step 1: Determine if RAG is needed
+    # Step 2: Use LLM for ambiguous cases
     decision_prompt = get_rag_decision_prompt(user_input)
     decision = generate_response(decision_prompt)
     rag_used = "NEED_RAG" in decision
     
     logger.info(f"RAG decision: {decision.strip()} (RAG used: {rag_used})")
     
-    # Step 2: Generate response based on RAG decision
+    # Step 3: Generate response based on RAG decision
     if rag_used:
         # Get relevant documents from Milvus
         hits = search_syllabus(user_input)
@@ -151,26 +193,57 @@ def chat(req: ChatRequest, authenticated: bool = Depends(get_api_key)):
         # Generate response using RAG
         final_prompt = get_rag_response_prompt(user_input, context)
         reply = generate_response(final_prompt)
+        
+        return {
+            "reply": reply,
+            "rag_used": True,
+            "rag_context": context
+        }
     else:
         # Generate general response without RAG
         final_prompt = get_general_response_prompt(user_input)
         reply = generate_response(final_prompt)
+        
+        return {
+            "reply": reply,
+            "rag_used": False,
+            "rag_context": None
+        }
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest, authenticated: bool = Depends(get_api_key)):
+    """
+    Process a chat request and return a response.
     
-    processing_time = time.time() - start_time
-    logger.info(f"Request processed in {processing_time:.2f} seconds")
+    Args:
+        req: The chat request containing the user's input
+        
+    Returns:
+        A response containing the LLM's reply
+    """
+    start_time = time.time()
+    user_input = req.user_input
     
-    # Prepare response
-    response = {
-        "reply": reply,
-        "rag_used": rag_used,
-        "processing_time": processing_time
-    }
+    if not user_input or not user_input.strip():
+        raise HTTPException(status_code=400, detail="User input cannot be empty")
     
-    # Include RAG context if used
-    if rag_used:
-        response["rag_context"] = context
+    logger.info(f"Received chat request: {user_input[:50]}...")
     
-    return response
+    try:
+        # Process chat in thread pool for CPU-intensive operations
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, _process_chat_sync, user_input)
+        
+        processing_time = time.time() - start_time
+        logger.info(f"Request processed in {processing_time:.2f} seconds")
+        
+        # Prepare response
+        result["processing_time"] = processing_time
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error processing chat request: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error processing request")
 
 @app.get("/health")
 def health_check():

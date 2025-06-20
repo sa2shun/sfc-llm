@@ -110,6 +110,13 @@ def process_data(csv_path):
             skipped += 1
             continue
         
+        # Skip research seminar courses (研究会を除外)
+        subject_name = str(row["科目名"]).strip()
+        if "研究会" in subject_name:
+            logger.debug(f"Skipping research seminar: {subject_name}")
+            skipped += 1
+            continue
+        
         # Print index for debugging - helps track progress
         if index % 100 == 0:
             logger.info(f"Processing index {index}")

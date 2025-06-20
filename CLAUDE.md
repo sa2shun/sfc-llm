@@ -21,6 +21,24 @@ This is a **Japanese language RAG (Retrieval-Augmented Generation) application**
 - **Academic Advisors**: Helping students with course selection
 - **Researchers**: Analyzing course offerings and curriculum structure
 
+## 🏗️ プロジェクト概要
+
+### アーキテクチャ
+- **コアシステム**: FastAPI + Milvus + LLM (Meta Llama 3)
+- **VLM対応**: LLaVA, Qwen2-VL による画像解析
+- **高速化**: vLLM による推論速度10-20倍向上
+- **データベース**: ベクトル検索による意味的類似性マッチング
+- **キャッシュ**: 埋め込み・検索結果の多層キャッシュ
+- **セキュリティ**: API認証、非rootユーザー実行
+
+### 主要コンポーネント
+- `src/chat_server.py`: 標準チャットサーバー
+- `src/vlm_chat_server.py`: VLM対応マルチモーダルサーバー  
+- `src/enhanced_chat_server.py`: 履修プランニング機能付きサーバー
+- `utils/vlm_engine.py`: Vision Language Model エンジン
+- `utils/vllm_engine.py`: 高速推論エンジン
+- `tests/`: 統合テストスイート
+
 ## Essential Commands
 
 ### Server Management
@@ -83,6 +101,11 @@ python scripts/test_search_performance.py
 
 # Test collections
 python src/test_collections.py
+
+# Comprehensive test suite
+python tests/run_tests.py --type all
+python tests/run_tests.py --type unit
+python tests/run_tests.py --type integration
 ```
 
 ### Dependency Management
