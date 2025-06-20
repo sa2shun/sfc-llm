@@ -1,6 +1,96 @@
 """
 Prompt templates for the SFC-LLM application.
 """
+from typing import List, Dict, Any
+import re
+
+def should_use_rag(user_input: str) -> bool:
+    """
+    Determine if RAG should be used for a given user query.
+    
+    Args:
+        user_input: The user's query
+        
+    Returns:
+        True if RAG should be used, False otherwise
+    """
+    # Keywords that indicate SFC course-related queries
+    course_keywords = [
+        'プログラミング', '授業', '科目', '履修', 'シラバス', '講義', 'ゼミ', '研究会',
+        'データサイエンス', '英語', '言語', '情報', '政策', '環境', 'メディア',
+        '教授', '先生', '単位', '課題', '試験', 'レポート', '成績', '評価',
+        'course', 'class', 'subject', 'syllabus', 'professor', 'credit', 'grade'
+    ]
+    
+    # SFC-specific keywords
+    sfc_keywords = ['sfc', 'ソニー', '湘南藤沢', '藤沢', '慶應', 'keio']
+    
+    user_lower = user_input.lower()
+    
+    # Check for course-related keywords
+    has_course_keywords = any(keyword in user_lower for keyword in course_keywords)
+    
+    # Check for SFC-specific keywords
+    has_sfc_keywords = any(keyword in user_lower for keyword in sfc_keywords)
+    
+    # Check for general patterns that suggest course queries
+    course_patterns = [
+        r'.*について教えて',
+        r'.*はありますか',
+        r'.*を探して',
+        r'.*がしたい',
+        r'.*を学びたい',
+        r'おすすめ.*',
+        r'どんな.*',
+        r'.*の特徴'
+    ]
+    
+    has_course_patterns = any(re.search(pattern, user_input) for pattern in course_patterns)
+    
+    # Use RAG if:
+    # 1. Contains course keywords, OR
+    # 2. Contains SFC keywords and course patterns, OR  
+    # 3. Question seems academic in nature
+    return has_course_keywords or (has_sfc_keywords and has_course_patterns)
+
+def create_rag_prompt(user_input: str, search_results: List[Dict[str, Any]]) -> str:
+    """
+    Create a RAG prompt from user input and search results.
+    
+    Args:
+        user_input: The user's query
+        search_results: List of search results from Milvus
+        
+    Returns:
+        A formatted prompt for the LLM
+    """
+    # Format search results into context
+    context_parts = []
+    
+    for i, result in enumerate(search_results[:5], 1):  # Limit to top 5 results
+        context_part = f"【授業{i}】\n"
+        
+        # Add available fields from search results
+        if 'subject_name' in result:
+            context_part += f"科目名: {result['subject_name']}\n"
+        if 'category' in result:
+            context_part += f"分野: {result['category']}\n"
+        if 'summary' in result:
+            context_part += f"概要: {result['summary']}\n"
+        if 'goals' in result:
+            context_part += f"目標: {result['goals']}\n"
+        if 'schedule' in result:
+            context_part += f"計画: {result['schedule']}\n"
+        
+        # Add distance/similarity score if available
+        if 'distance' in result:
+            context_part += f"関連度: {result['distance']:.3f}\n"
+        
+        context_parts.append(context_part)
+    
+    context = "\n".join(context_parts)
+    
+    return get_rag_response_prompt(user_input, context)
 
 def get_rag_decision_prompt(query: str) -> str:
     """

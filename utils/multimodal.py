@@ -50,7 +50,8 @@ class MultimodalProcessor:
                 logger.info("BLIP model loaded successfully")
             except Exception as e:
                 logger.warning(f"Failed to load BLIP model: {e}")
-                BLIP_AVAILABLE = False
+                self.blip_processor = None
+                self.blip_model = None
     
     def extract_pdf_content(self, pdf_path: Union[str, Path, bytes]) -> Dict[str, Any]:
         """

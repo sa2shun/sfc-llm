@@ -15,7 +15,9 @@ try:
         LlavaNextProcessor, 
         LlavaNextForConditionalGeneration,
         Qwen2VLForConditionalGeneration, 
-        AutoProcessor
+        AutoProcessor,
+        BlipProcessor,
+        BlipForConditionalGeneration
     )
     from PIL import Image
     VLM_AVAILABLE = True
@@ -38,6 +40,9 @@ class VLMEngine:
         self.model = None
         self.processor = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.use_blip_fallback = False
+        self.blip_processor = None
+        self.blip_model = None
         
         if not VLM_AVAILABLE:
             logger.error("VLM dependencies not available. Install: transformers, torch, pillow")
@@ -72,6 +77,43 @@ class VLMEngine:
             logger.error(f"Failed to load VLM model: {e}")
             self.model = None
             self.processor = None
+            self._init_blip_fallback()
+    
+    def _init_blip_fallback(self):
+        """Initialize BLIP model as fallback when VLM models fail."""
+        try:
+            logger.info("Initializing BLIP fallback model...")
+            self.blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+            self.blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+            if self.device == "cuda":
+                self.blip_model = self.blip_model.to("cuda")
+            self.use_blip_fallback = True
+            logger.info("BLIP fallback model loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load BLIP fallback: {e}")
+            self.use_blip_fallback = False
+    
+    def _blip_fallback(self, image: Image.Image, text: str) -> str:
+        """Use BLIP for image understanding when VLM is not available."""
+        if not self.use_blip_fallback or not self.blip_model:
+            return "No image processing available"
+        
+        try:
+            # Generate image caption
+            inputs = self.blip_processor(image, return_tensors="pt")
+            if self.device == "cuda":
+                inputs = {k: v.to("cuda") for k, v in inputs.items()}
+            
+            out = self.blip_model.generate(**inputs, max_length=50)
+            caption = self.blip_processor.decode(out[0], skip_special_tokens=True)
+            
+            # Create a response combining caption with user query
+            response = f"画像の内容: {caption}\n\nご質問「{text}」に対して、この画像は{caption}を示しています。"
+            return response
+            
+        except Exception as e:
+            logger.error(f"BLIP fallback error: {e}")
+            return f"画像処理中にエラーが発生しました: {e}"
     
     def process_image_and_text(
         self, 
@@ -93,7 +135,20 @@ class VLMEngine:
             Generated response text
         """
         if not self.model or not self.processor:
-            return "VLM model not available"
+            if self.use_blip_fallback:
+                # Convert image input to PIL Image for BLIP fallback
+                if isinstance(image, str):
+                    if image.startswith("data:image"):
+                        image_data = base64.b64decode(image.split(",")[1])
+                        image = Image.open(BytesIO(image_data))
+                    else:
+                        image = Image.open(image)
+                elif isinstance(image, bytes):
+                    image = Image.open(BytesIO(image))
+                
+                return self._blip_fallback(image, text)
+            else:
+                return "VLM model not available"
         
         try:
             # Process image input
